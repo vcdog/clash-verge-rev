@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - fix/tray-nested-latency-8726
+    paths-ignore:
+      - .github/workflows/publish-trayfix-release.yml
   workflow_dispatch:
 
 permissions:
