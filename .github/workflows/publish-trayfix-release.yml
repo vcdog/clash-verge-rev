@@ -7,12 +7,10 @@ on:
     paths:
       - .github/workflows/publish-trayfix-release.yml
 
-permissions:
-  contents: write
-  actions: read
+permissions: write-all
 
 env:
-  GH_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   TAG_NAME: v2.6.0-trayfix-v1.1
   RELEASE_TITLE: Clash Verge Rev v2.6.0 TrayFix v1.1
   SOURCE_RUN_ID: "45366091520"
@@ -23,6 +21,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository for tag publication
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create or reuse release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag $TAG_NAME already exists."
+          else
+            git tag "$TAG_NAME" "$TARGET_SHA"
+            git push origin "refs/tags/$TAG_NAME"
+          fi
+
       - name: Download successful Windows x64 build
         shell: bash
         run: |
@@ -102,7 +116,7 @@ jobs:
           else
             gh release create "$TAG_NAME" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$TARGET_SHA" \
+              --verify-tag \
               --title "$RELEASE_TITLE" \
               --notes-file release-notes.md
           fi
