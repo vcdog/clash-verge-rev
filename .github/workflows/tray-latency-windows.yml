@@ -31,7 +31,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: trayfix-v1-rust
+          prefix-key: trayfix-v1.1-rust
           shared-key: windows-x64
           workspaces: |
             . -> target
@@ -89,7 +89,7 @@ jobs:
           New-Item -ItemType Directory -Force dist-artifacts | Out-Null
           $file = Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
           if (-not $file) { throw "NSIS installer not found" }
-          $dest = "dist-artifacts/Clash.Verge_${version}_x64-setup_trayfix_v1.0.exe"
+          $dest = "dist-artifacts/Clash.Verge_${version}_x64-setup_trayfix_v1.1.exe"
           Copy-Item $file.FullName $dest
           Write-Host "Installer: $dest"
 
