@@ -1,3 +1,4 @@
+# Custom Windows x64 build for tray nested-latency fix
 name: Tray Latency Fix - Windows x64
 
 on:
