@@ -27,6 +27,14 @@ pub async fn switch_proxy_node(group_name: String, proxy_name: String, unfix: bo
         .stringify_err()
 }
 
+/// Mirrors dashboard latency results into the tray-side cache.
+#[tauri::command]
+#[specta::specta]
+pub async fn record_tray_proxy_delay(name: String, group: String, delay: i64) -> CmdResult<()> {
+    crate::core::tray::record_proxy_delay(&name, &group, delay);
+    Ok(())
+}
+
 fn runtime_group_order(config: Option<&Mapping>) -> Vec<String> {
     let mut seen = HashSet::new();
 
