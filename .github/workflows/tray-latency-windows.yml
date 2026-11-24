@@ -65,6 +65,19 @@ jobs:
           Write-Host "Service IPC source: $serviceDir"
           git -C $serviceDir rev-parse HEAD
 
+      - name: Pin known-good Mihomo Alpha for custom build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force node_modules/.verge | Out-Null
+          $cache = @{
+            META_ALPHA_VERSION = @{
+              version = "alpha-fc3bd70"
+              timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            }
+          } | ConvertTo-Json -Depth 4
+          Set-Content -Encoding utf8 node_modules/.verge/.version_cache.json $cache
+          Get-Content node_modules/.verge/.version_cache.json
+
       - name: Prepare sidecars
         run: pnpm run prebuild x86_64-pc-windows-msvc
 
