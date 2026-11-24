@@ -512,8 +512,7 @@ const TRAY_PROXY_DELAY_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 const TRAY_DIRECT_DELAY_CACHE_TTL: Duration = Duration::from_secs(60);
 const TRAY_DIRECT_DELAY_TIMEOUT_MAX_MS: u32 = 3_000;
 const TRAY_DIRECT_DELAY_TIMEOUT_MIN_MS: u32 = 1_000;
-const TRAY_DIRECT_DELAY_URLS: [&str; 3] = [
-    "http://connectivitycheck.platform.hicloud.com/generate_204",
+const TRAY_DIRECT_DELAY_URLS: [&str; 2] = [
     "http://connect.rom.miui.com/generate_204",
     "http://wifi.vivo.com.cn/generate_204",
 ];
