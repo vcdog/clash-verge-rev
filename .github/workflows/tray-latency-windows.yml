@@ -65,18 +65,22 @@ jobs:
           Write-Host "Service IPC source: $serviceDir"
           git -C $serviceDir rev-parse HEAD
 
-      - name: Pin known-good Mihomo Alpha for custom build
+      - name: Seed Alpha sidecar from stable Mihomo
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force node_modules/.verge | Out-Null
-          $cache = @{
-            META_ALPHA_VERSION = @{
-              version = "alpha-fc3bd70"
-              timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            }
-          } | ConvertTo-Json -Depth 4
-          Set-Content -Encoding utf8 node_modules/.verge/.version_cache.json $cache
-          Get-Content node_modules/.verge/.version_cache.json
+          $version = (Invoke-WebRequest -UseBasicParsing "https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt").Content.Trim()
+          $zipUrl = "https://github.com/MetaCubeX/mihomo/releases/download/$version/mihomo-windows-amd64-v2-$version.zip"
+          $work = Join-Path $env:RUNNER_TEMP "mihomo-stable-as-alpha"
+          $zip = Join-Path $work "mihomo.zip"
+          $out = Join-Path $work "unzipped"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Invoke-WebRequest -UseBasicParsing $zipUrl -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $out -Force
+          $exe = Get-ChildItem $out -Recurse -Filter "*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "Stable Mihomo executable not found in archive" }
+          New-Item -ItemType Directory -Force "src-tauri/sidecar" | Out-Null
+          Copy-Item $exe.FullName "src-tauri/sidecar/verge-mihomo-alpha-x86_64-pc-windows-msvc.exe" -Force
+          Write-Host "Seeded alpha sidecar from stable Mihomo $version"
 
       - name: Prepare sidecars
         run: pnpm run prebuild x86_64-pc-windows-msvc
