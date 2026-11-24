@@ -83,6 +83,9 @@ export const commands = {
     __TAURI_INVOKE<null>('record_selected_node', { groupName, node }),
   switchProxyNode: (groupName: string, proxyName: string, unfix: boolean) =>
     __TAURI_INVOKE<null>('switch_proxy_node', { groupName, proxyName, unfix }),
+  /**  Mirrors dashboard latency results into the tray-side cache. */
+  recordTrayProxyDelay: (name: string, group: string, delay: number) =>
+    __TAURI_INVOKE<null>('record_tray_proxy_delay', { name, group, delay }),
   saveDnsConfig: (dnsConfig: YamlMapping) =>
     __TAURI_INVOKE<null>('save_dns_config', { dnsConfig }),
   applyDnsConfig: (apply: boolean) =>

@@ -507,6 +507,7 @@ fn create_profile_menu_item(
 }
 
 const TRAY_GROUP_DEPTH_LIMIT: usize = 8;
+const TRAY_PROXY_DELAY_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 const TRAY_DIRECT_DELAY_CACHE_TTL: Duration = Duration::from_secs(60);
 const TRAY_DIRECT_DELAY_DEFAULT_URL: &str = "http://cp.cloudflare.com/generate_204";
 const TRAY_DIRECT_DELAY_DEFAULT_TIMEOUT_MS: u32 = 10_000;
@@ -524,6 +525,68 @@ struct TrayDirectDelayCache {
 
 static TRAY_DIRECT_DELAY_CACHE: LazyLock<tokio::sync::Mutex<Option<TrayDirectDelayCache>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(None));
+
+#[derive(Clone, Copy)]
+struct TrayProxyDelayCacheEntry {
+    measured_at: Instant,
+    delay: i64,
+}
+
+#[derive(Default)]
+struct TrayProxyDelayCache {
+    by_group: HashMap<std::string::String, HashMap<std::string::String, TrayProxyDelayCacheEntry>>,
+    by_name: HashMap<std::string::String, TrayProxyDelayCacheEntry>,
+}
+
+static TRAY_PROXY_DELAY_CACHE: LazyLock<std::sync::Mutex<TrayProxyDelayCache>> =
+    LazyLock::new(|| std::sync::Mutex::new(TrayProxyDelayCache::default()));
+
+pub fn record_proxy_delay(name: &str, group: &str, delay: i64) {
+    if delay < 0 || name.is_empty() || group.is_empty() {
+        return;
+    }
+
+    let Ok(mut cache) = TRAY_PROXY_DELAY_CACHE.lock() else {
+        logging!(warn, Type::Tray, "Failed to lock tray proxy delay cache");
+        return;
+    };
+
+    let entry = TrayProxyDelayCacheEntry {
+        measured_at: Instant::now(),
+        delay,
+    };
+    cache
+        .by_group
+        .entry(group.to_owned())
+        .or_default()
+        .insert(name.to_owned(), entry);
+    cache.by_name.insert(name.to_owned(), entry);
+}
+
+fn cached_proxy_delay(group: &str, name: &str) -> Option<i64> {
+    let Ok(cache) = TRAY_PROXY_DELAY_CACHE.lock() else {
+        return None;
+    };
+
+    let fresh = |entry: &TrayProxyDelayCacheEntry| {
+        (entry.measured_at.elapsed() < TRAY_PROXY_DELAY_CACHE_TTL).then_some(entry.delay)
+    };
+
+    cache
+        .by_group
+        .get(group)
+        .and_then(|group_cache| group_cache.get(name))
+        .and_then(fresh)
+        .or_else(|| cache.by_name.get(name).and_then(fresh))
+}
+
+fn format_proxy_delay(delay: i64) -> std::string::String {
+    if delay <= 0 || delay >= 1_000_000 {
+        "超时".into()
+    } else {
+        format!("{delay}ms")
+    }
+}
 
 async fn measure_tray_direct_delay(
     verge: &IVerge,
@@ -572,6 +635,7 @@ async fn measure_tray_direct_delay(
 
 fn proxy_delay_text(
     proxy_nodes_data: &Proxies,
+    group_name: &str,
     proxy_name: &str,
     direct_delay: Option<TrayDirectDelay>,
 ) -> Option<std::string::String> {
@@ -581,11 +645,6 @@ fn proxy_delay_text(
         let Some(proxy) = proxy_nodes_data.proxies.get(current) else {
             return Some("-ms".into());
         };
-
-        if let Some(now) = proxy.now.as_deref().filter(|now| !now.is_empty() && *now != current) {
-            current = now;
-            continue;
-        }
 
         match &proxy.proxy_type {
             ProxyType::Direct => {
@@ -602,6 +661,17 @@ fn proxy_delay_text(
             | ProxyType::Compatible
             | ProxyType::Dns => return None,
             _ => {}
+        }
+
+        // The dashboard keeps manual latency-test results in its own DelayManager cache.
+        // Prefer the synchronized tray cache before falling back to Mihomo history.
+        if let Some(delay) = cached_proxy_delay(group_name, current) {
+            return Some(format_proxy_delay(delay));
+        }
+
+        if let Some(now) = proxy.now.as_deref().filter(|now| !now.is_empty() && *now != current) {
+            current = now;
+            continue;
         }
 
         return Some(proxy.history.last().map_or_else(
@@ -651,7 +721,7 @@ fn create_subcreate_proxy_menu_item(
                         let is_selected = *proxy_str == now_proxy;
                         let item_id = format!("proxy_{}_{}", group_name, proxy_str);
 
-                        let delay_text = proxy_delay_text(&proxy_nodes_data, proxy_str, direct_delay);
+                        let delay_text = proxy_delay_text(&proxy_nodes_data, group_name, proxy_str, direct_delay);
 
                         let display_text = delay_text.map_or_else(
                             || proxy_str.to_string(),
