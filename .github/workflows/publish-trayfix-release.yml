@@ -1,4 +1,4 @@
-name: Publish TrayFix v1.0 Release
+name: Publish TrayFix v1.1 Release
 
 on:
   push:
@@ -13,10 +13,10 @@ permissions:
 
 env:
   GH_TOKEN: ${{ github.token }}
-  TAG_NAME: v2.6.0-trayfix-v1.0
-  RELEASE_TITLE: Clash Verge Rev v2.6.0 TrayFix v1.0
-  SOURCE_RUN_ID: "45345613066"
-  TARGET_SHA: e931938e94f8d613e0500fa0c316f0ebc9a510c3
+  TAG_NAME: v2.6.0-trayfix-v1.1
+  RELEASE_TITLE: Clash Verge Rev v2.6.0 TrayFix v1.1
+  SOURCE_RUN_ID: "45366091520"
+  TARGET_SHA: a8d4cb7122d9f872f9b600fc7f663275be5f22e7
 
 jobs:
   publish:
@@ -44,43 +44,49 @@ jobs:
           (cd "$(dirname "$EXE")" && sha256sum "$EXE_NAME") > release-assets/SHA256SUMS.txt
 
           cat > release-notes.md <<'EOF'
-          ## Clash Verge Rev v2.6.0 TrayFix v1.0
+          ## Clash Verge Rev v2.6.0 TrayFix v1.1
 
           基于 Clash Verge Rev **v2.6.0 / dev** 构建的 Windows x64 自定义补丁版。
 
-          ### 新增补丁功能
+          ### v1.1 新增 / 优化
 
-          修复托盘菜单中嵌套代理组显示 `-ms` 的问题。
+          - 保留 v1.0 的托盘嵌套代理组递归延迟显示：沿代理组当前 `now` 逐级解析到最终实际节点，并显示最终节点已有延迟。
+          - `DIRECT` 改为通过 Mihomo delay API 获取真实直连延迟，并在托盘中显示具体毫秒值。
+          - `DIRECT` 测速结果全局共享并缓存 60 秒，避免每个策略组重复发起相同测速。
+          - `DIRECT` 测速复用 Clash Verge Rev 的默认延迟测试 URL 和超时设置；失败或超时显示「超时」。
+          - `REJECT`、`REJECT-DROP`、`PASS`、`PassRule`、`COMPATIBLE`、`DNS` 等非测速型特殊出口不再显示无意义的 `| -ms`。
+          - 普通代理节点从未获得延迟数据时仍显示 `-ms`；已有测速记录但结果为无效/超时时显示「超时」。
 
-          当托盘中的菜单项本身是 `select`、`url-test`、`fallback` 等代理组时，会沿该组当前的 `now` 选择递归解析，直到找到最终实际代理节点，并显示该节点已有的最近一次延迟。
-
-          示例：
+          ### 显示示例
 
           ```text
           YouTube
-            节点选择   | 191ms
-            自动选择   | 208ms
-            DIRECT     | -ms
+            节点选择   | 245ms
+            自动选择   | 179ms
+            DIRECT     | 35ms
+
+          广告拦截
+            REJECT
+            DIRECT     | 35ms
           ```
 
           ### 实现范围
 
-          - 只读取 Mihomo 已存在的代理组选择状态和节点延迟历史。
-          - 不新增托盘测速请求。
-          - 不修改 Dashboard 的测速行为。
-          - 不修改测速 URL、前端延迟缓存或 Mihomo 选路逻辑。
-          - 嵌套代理组解析设置最大递归深度，避免异常循环引用。
-          - 不需要修改 XBoard / ClashMeta 订阅模板。
+          - 不修改 Dashboard 的现有测速行为。
+          - 不修改 Mihomo 的选路逻辑。
+          - 不修改 XBoard / ClashMeta 订阅模板。
+          - 嵌套代理组解析仍有最大深度限制，避免异常循环引用。
 
           ### 关联
 
           - 上游功能请求：clash-verge-rev/clash-verge-rev#8726
           - 构建分支：`fix/tray-nested-latency-8726`
-          - Windows x64 NSIS 安装包由 GitHub Actions Run #45345613066 构建成功。
+          - 功能提交：`a8d4cb7122d9f872f9b600fc7f663275be5f22e7`
+          - Windows x64 NSIS：GitHub Actions Run #45366091520
 
           ### 安装包
 
-          `Clash.Verge_2.6.0_x64-setup_trayfix_v1.0.exe`
+          `Clash.Verge_2.6.0_x64-setup_trayfix_v1.1.exe`
 
           > 这是自定义补丁构建，并非 clash-verge-rev 官方发布版本。
           EOF
