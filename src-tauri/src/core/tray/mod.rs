@@ -13,6 +13,7 @@ use crate::{
 };
 use clash_verge_limiter::{Limiter, SystemClock, SystemLimiter};
 use clash_verge_logging::logging_error;
+use futures::{StreamExt as _, stream::FuturesUnordered};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_mihomo::models::{Proxies, ProxyType};
 use tokio::fs;
@@ -509,8 +510,13 @@ fn create_profile_menu_item(
 const TRAY_GROUP_DEPTH_LIMIT: usize = 8;
 const TRAY_PROXY_DELAY_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 const TRAY_DIRECT_DELAY_CACHE_TTL: Duration = Duration::from_secs(60);
-const TRAY_DIRECT_DELAY_DEFAULT_URL: &str = "http://cp.cloudflare.com/generate_204";
-const TRAY_DIRECT_DELAY_DEFAULT_TIMEOUT_MS: u32 = 10_000;
+const TRAY_DIRECT_DELAY_TIMEOUT_MAX_MS: u32 = 3_000;
+const TRAY_DIRECT_DELAY_TIMEOUT_MIN_MS: u32 = 1_000;
+const TRAY_DIRECT_DELAY_URLS: [&str; 3] = [
+    "http://connectivitycheck.platform.hicloud.com/generate_204",
+    "http://connect.rom.miui.com/generate_204",
+    "http://wifi.vivo.com.cn/generate_204",
+];
 
 #[derive(Clone, Copy)]
 enum TrayDirectDelay {
@@ -603,28 +609,54 @@ async fn measure_tray_direct_delay(
         return Some(cached.state);
     }
 
-    let test_url = verge
-        .default_latency_test
-        .as_deref()
-        .map(str::trim)
-        .filter(|url| !url.is_empty())
-        .unwrap_or(TRAY_DIRECT_DELAY_DEFAULT_URL);
     let timeout = verge
         .default_latency_timeout
         .filter(|timeout| *timeout > 0)
-        .map_or(TRAY_DIRECT_DELAY_DEFAULT_TIMEOUT_MS, |timeout| timeout as u32);
+        .map_or(TRAY_DIRECT_DELAY_TIMEOUT_MAX_MS, |timeout| timeout as u32)
+        .clamp(TRAY_DIRECT_DELAY_TIMEOUT_MIN_MS, TRAY_DIRECT_DELAY_TIMEOUT_MAX_MS);
 
-    let state = match handle::Handle::mihomo()
-        .delay_proxy_by_name("DIRECT", test_url, timeout)
-        .await
-    {
-        Ok(result) if result.delay > 0 => TrayDirectDelay::Delay(result.delay),
-        Ok(_) => TrayDirectDelay::Timeout,
-        Err(error) => {
-            logging!(debug, Type::Tray, "DIRECT latency check failed: {error:#}");
-            TrayDirectDelay::Timeout
+    // DIRECT should measure a nearby direct path, not reuse the proxy-node test URL.
+    // Mainland-friendly 204 endpoints are raced in parallel; the first valid result wins.
+    let mihomo = handle::Handle::mihomo();
+    let mut probes = FuturesUnordered::new();
+    for test_url in TRAY_DIRECT_DELAY_URLS {
+        probes.push(async move {
+            (
+                test_url,
+                mihomo
+                    .delay_proxy_by_name("DIRECT", test_url, timeout)
+                    .await,
+            )
+        });
+    }
+
+    let mut state = TrayDirectDelay::Timeout;
+    while let Some((test_url, result)) = probes.next().await {
+        match result {
+            Ok(result) if result.delay > 0 => {
+                logging!(
+                    debug,
+                    Type::Tray,
+                    "DIRECT latency check succeeded via {}: {}ms",
+                    test_url,
+                    result.delay
+                );
+                state = TrayDirectDelay::Delay(result.delay);
+                break;
+            }
+            Ok(_) => {
+                logging!(debug, Type::Tray, "DIRECT latency check timed out via {}", test_url);
+            }
+            Err(error) => {
+                logging!(
+                    debug,
+                    Type::Tray,
+                    "DIRECT latency check failed via {}: {error:#}",
+                    test_url
+                );
+            }
         }
-    };
+    }
 
     *cache = Some(TrayDirectDelayCache {
         measured_at: Instant::now(),
