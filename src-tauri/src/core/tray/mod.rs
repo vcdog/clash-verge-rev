@@ -499,6 +499,34 @@ fn create_profile_menu_item(
         .collect()
 }
 
+const TRAY_GROUP_DEPTH_LIMIT: usize = 8;
+
+fn proxy_delay_text(proxy_nodes_data: &Proxies, proxy_name: &str) -> std::string::String {
+    let mut current = proxy_name;
+
+    for _ in 0..TRAY_GROUP_DEPTH_LIMIT {
+        let Some(proxy) = proxy_nodes_data.proxies.get(current) else {
+            return "-ms".into();
+        };
+
+        if let Some(now) = proxy.now.as_deref().filter(|now| !now.is_empty() && *now != current) {
+            current = now;
+            continue;
+        }
+
+        return proxy.history.last().map_or_else(
+            || "-ms".into(),
+            |history| match history.delay {
+                0 => "-ms".into(),
+                delay if delay >= 10000 => "-ms".into(),
+                delay => format!("{delay}ms"),
+            },
+        );
+    }
+
+    "-ms".into()
+}
+
 fn create_subcreate_proxy_menu_item(
     app_handle: &AppHandle,
     proxy_mode: &str,
@@ -532,18 +560,7 @@ fn create_subcreate_proxy_menu_item(
                         let is_selected = *proxy_str == now_proxy;
                         let item_id = format!("proxy_{}_{}", group_name, proxy_str);
 
-                        let delay_text = proxy_nodes_data
-                            .proxies
-                            .get(proxy_str)
-                            .and_then(|h| h.history.last())
-                            .map_or_else(
-                                || "-ms".into(),
-                                |h| match h.delay {
-                                    0 => "-ms".into(),
-                                    delay if delay >= 10000 => "-ms".into(),
-                                    _ => format!("{}ms", h.delay),
-                                },
-                            );
+                        let delay_text = proxy_delay_text(&proxy_nodes_data, proxy_str);
 
                         let display_text = format!("{}   | {}", proxy_str, delay_text);
 

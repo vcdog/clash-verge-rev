@@ -1,0 +1,88 @@
+name: Tray Latency Fix - Windows x64
+
+on:
+  push:
+    branches:
+      - fix/tray-nested-latency-8726
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+  HUSKY: 0
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.100.0
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: trayfix-v1-rust
+          shared-key: windows-x64
+          workspaces: |
+            . -> target
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '26.13.1'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare sidecars
+        run: pnpm run prebuild x86_64-pc-windows-msvc
+
+      - name: Disable updater artifact signing for custom build
+        shell: pwsh
+        run: |
+          @'
+          {
+            "bundle": {
+              "createUpdaterArtifacts": false
+            }
+          }
+          '@ | Set-Content -Encoding utf8 src-tauri/tauri.trayfix.conf.json
+
+      - name: Build Windows x64 NSIS installer
+        shell: pwsh
+        run: |
+          pnpm tauri build --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.trayfix.conf.json
+
+      - name: Rename installer
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force dist-artifacts | Out-Null
+          $file = Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          if (-not $file) { throw "NSIS installer not found" }
+          $dest = "dist-artifacts/Clash.Verge_${version}_x64-setup_trayfix_v1.0.exe"
+          Copy-Item $file.FullName $dest
+          Write-Host "Installer: $dest"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: Clash-Verge-TrayFix-Windows-x64
+          path: dist-artifacts/*.exe
+          if-no-files-found: error
+          retention-days: 14
