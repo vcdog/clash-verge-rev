@@ -13,8 +13,9 @@ use crate::{
 };
 use clash_verge_limiter::{Limiter, SystemClock, SystemLimiter};
 use clash_verge_logging::logging_error;
+use futures::{StreamExt as _, stream::FuturesUnordered};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri_plugin_mihomo::models::Proxies;
+use tauri_plugin_mihomo::models::{Proxies, ProxyType};
 use tokio::fs;
 
 use super::handle;
@@ -22,7 +23,7 @@ use anyhow::Result;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{
     AppHandle, Wry,
     menu::{CheckMenuItem, IsMenuItem, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
@@ -257,6 +258,12 @@ impl Tray {
             (None, None)
         };
 
+        let direct_delay = if fetch_proxy_groups {
+            measure_tray_direct_delay(&verge, proxy_nodes_data.as_ref()).await
+        } else {
+            None
+        };
+
         let verge = if fetch_proxy_groups {
             Config::verge().await.latest_arc()
         } else {
@@ -282,6 +289,7 @@ impl Tray {
                         &profiles,
                         runtime_proxy_groups_order,
                         proxy_nodes_data,
+                        direct_delay,
                     )?;
                     logging_error!(Type::Tray, tray.set_menu(Some(menu)));
                     Ok(())
@@ -499,11 +507,223 @@ fn create_profile_menu_item(
         .collect()
 }
 
+const TRAY_GROUP_DEPTH_LIMIT: usize = 8;
+const TRAY_PROXY_DELAY_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
+const TRAY_DIRECT_DELAY_CACHE_TTL: Duration = Duration::from_secs(60);
+const TRAY_DIRECT_DELAY_TIMEOUT_MAX_MS: u32 = 3_000;
+const TRAY_DIRECT_DELAY_TIMEOUT_MIN_MS: u32 = 1_000;
+const TRAY_DIRECT_DELAY_URLS: [&str; 2] = [
+    "http://connect.rom.miui.com/generate_204",
+    "http://wifi.vivo.com.cn/generate_204",
+];
+
+#[derive(Clone, Copy)]
+enum TrayDirectDelay {
+    Delay(u32),
+    Timeout,
+}
+
+struct TrayDirectDelayCache {
+    measured_at: Instant,
+    state: TrayDirectDelay,
+}
+
+static TRAY_DIRECT_DELAY_CACHE: LazyLock<tokio::sync::Mutex<Option<TrayDirectDelayCache>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(None));
+
+#[derive(Clone, Copy)]
+struct TrayProxyDelayCacheEntry {
+    measured_at: Instant,
+    delay: i64,
+}
+
+#[derive(Default)]
+struct TrayProxyDelayCache {
+    by_group: HashMap<std::string::String, HashMap<std::string::String, TrayProxyDelayCacheEntry>>,
+    by_name: HashMap<std::string::String, TrayProxyDelayCacheEntry>,
+}
+
+static TRAY_PROXY_DELAY_CACHE: LazyLock<std::sync::Mutex<TrayProxyDelayCache>> =
+    LazyLock::new(|| std::sync::Mutex::new(TrayProxyDelayCache::default()));
+
+pub fn record_proxy_delay(name: &str, group: &str, delay: i64) {
+    if delay < 0 || name.is_empty() || group.is_empty() {
+        return;
+    }
+
+    let Ok(mut cache) = TRAY_PROXY_DELAY_CACHE.lock() else {
+        logging!(warn, Type::Tray, "Failed to lock tray proxy delay cache");
+        return;
+    };
+
+    let entry = TrayProxyDelayCacheEntry {
+        measured_at: Instant::now(),
+        delay,
+    };
+    cache
+        .by_group
+        .entry(group.to_owned())
+        .or_default()
+        .insert(name.to_owned(), entry);
+    cache.by_name.insert(name.to_owned(), entry);
+}
+
+fn cached_proxy_delay(group: &str, name: &str) -> Option<i64> {
+    let Ok(cache) = TRAY_PROXY_DELAY_CACHE.lock() else {
+        return None;
+    };
+
+    let fresh = |entry: &TrayProxyDelayCacheEntry| {
+        (entry.measured_at.elapsed() < TRAY_PROXY_DELAY_CACHE_TTL).then_some(entry.delay)
+    };
+
+    cache
+        .by_group
+        .get(group)
+        .and_then(|group_cache| group_cache.get(name))
+        .and_then(fresh)
+        .or_else(|| cache.by_name.get(name).and_then(fresh))
+}
+
+fn format_proxy_delay(delay: i64) -> std::string::String {
+    if delay <= 0 || delay >= 1_000_000 {
+        "超时".into()
+    } else {
+        format!("{delay}ms")
+    }
+}
+
+async fn measure_tray_direct_delay(
+    verge: &IVerge,
+    proxy_nodes_data: Option<&Proxies>,
+) -> Option<TrayDirectDelay> {
+    if !proxy_nodes_data.is_some_and(|data| data.proxies.contains_key("DIRECT")) {
+        return None;
+    }
+
+    let mut cache = TRAY_DIRECT_DELAY_CACHE.lock().await;
+    if let Some(cached) = cache.as_ref()
+        && cached.measured_at.elapsed() < TRAY_DIRECT_DELAY_CACHE_TTL
+    {
+        return Some(cached.state);
+    }
+
+    let timeout = verge
+        .default_latency_timeout
+        .filter(|timeout| *timeout > 0)
+        .map_or(TRAY_DIRECT_DELAY_TIMEOUT_MAX_MS, |timeout| timeout as u32)
+        .clamp(TRAY_DIRECT_DELAY_TIMEOUT_MIN_MS, TRAY_DIRECT_DELAY_TIMEOUT_MAX_MS);
+
+    // DIRECT should measure a nearby direct path, not reuse the proxy-node test URL.
+    // Mainland-friendly 204 endpoints are raced in parallel; the first valid result wins.
+    let mihomo = handle::Handle::mihomo();
+    let mut probes = FuturesUnordered::new();
+    for test_url in TRAY_DIRECT_DELAY_URLS {
+        probes.push(async move {
+            (
+                test_url,
+                mihomo
+                    .delay_proxy_by_name("DIRECT", test_url, timeout)
+                    .await,
+            )
+        });
+    }
+
+    let mut state = TrayDirectDelay::Timeout;
+    while let Some((test_url, result)) = probes.next().await {
+        match result {
+            Ok(result) if result.delay > 0 => {
+                logging!(
+                    debug,
+                    Type::Tray,
+                    "DIRECT latency check succeeded via {}: {}ms",
+                    test_url,
+                    result.delay
+                );
+                state = TrayDirectDelay::Delay(result.delay);
+                break;
+            }
+            Ok(_) => {
+                logging!(debug, Type::Tray, "DIRECT latency check timed out via {}", test_url);
+            }
+            Err(error) => {
+                logging!(
+                    debug,
+                    Type::Tray,
+                    "DIRECT latency check failed via {}: {error:#}",
+                    test_url
+                );
+            }
+        }
+    }
+
+    *cache = Some(TrayDirectDelayCache {
+        measured_at: Instant::now(),
+        state,
+    });
+    Some(state)
+}
+
+fn proxy_delay_text(
+    proxy_nodes_data: &Proxies,
+    group_name: &str,
+    proxy_name: &str,
+    direct_delay: Option<TrayDirectDelay>,
+) -> Option<std::string::String> {
+    let mut current = proxy_name;
+
+    for _ in 0..TRAY_GROUP_DEPTH_LIMIT {
+        let Some(proxy) = proxy_nodes_data.proxies.get(current) else {
+            return Some("-ms".into());
+        };
+
+        match &proxy.proxy_type {
+            ProxyType::Direct => {
+                return Some(match direct_delay {
+                    Some(TrayDirectDelay::Delay(delay)) => format!("{delay}ms"),
+                    Some(TrayDirectDelay::Timeout) => "超时".into(),
+                    None => "-ms".into(),
+                });
+            }
+            ProxyType::Reject
+            | ProxyType::RejectDrop
+            | ProxyType::Pass
+            | ProxyType::PassRule
+            | ProxyType::Compatible
+            | ProxyType::Dns => return None,
+            _ => {}
+        }
+
+        // The dashboard keeps manual latency-test results in its own DelayManager cache.
+        // Prefer the synchronized tray cache before falling back to Mihomo history.
+        if let Some(delay) = cached_proxy_delay(group_name, current) {
+            return Some(format_proxy_delay(delay));
+        }
+
+        if let Some(now) = proxy.now.as_deref().filter(|now| !now.is_empty() && *now != current) {
+            current = now;
+            continue;
+        }
+
+        return Some(proxy.history.last().map_or_else(
+            || "-ms".into(),
+            |history| match history.delay {
+                0 => "超时".into(),
+                delay if delay >= 10000 => "超时".into(),
+                delay => format!("{delay}ms"),
+            },
+        ));
+    }
+
+    Some("-ms".into())
+}
+
 fn create_subcreate_proxy_menu_item(
     app_handle: &AppHandle,
     proxy_mode: &str,
     proxy_group_order_map: Option<HashMap<String, usize>>,
     proxy_nodes_data: Option<Proxies>,
+    direct_delay: Option<TrayDirectDelay>,
 ) -> Vec<Submenu<Wry>> {
     let proxy_submenus: Vec<Submenu<Wry>> = {
         let mut submenus: Vec<(String, usize, Submenu<Wry>)> = Vec::new();
@@ -532,20 +752,12 @@ fn create_subcreate_proxy_menu_item(
                         let is_selected = *proxy_str == now_proxy;
                         let item_id = format!("proxy_{}_{}", group_name, proxy_str);
 
-                        let delay_text = proxy_nodes_data
-                            .proxies
-                            .get(proxy_str)
-                            .and_then(|h| h.history.last())
-                            .map_or_else(
-                                || "-ms".into(),
-                                |h| match h.delay {
-                                    0 => "-ms".into(),
-                                    delay if delay >= 10000 => "-ms".into(),
-                                    _ => format!("{}ms", h.delay),
-                                },
-                            );
+                        let delay_text = proxy_delay_text(&proxy_nodes_data, group_name, proxy_str, direct_delay);
 
-                        let display_text = format!("{}   | {}", proxy_str, delay_text);
+                        let display_text = delay_text.map_or_else(
+                            || proxy_str.to_string(),
+                            |delay| format!("{}   | {}", proxy_str, delay),
+                        );
 
                         CheckMenuItem::with_id(app_handle, item_id, display_text, true, is_selected, None::<&str>)
                             .map_err(|e| logging!(warn, Type::Tray, "Failed to create proxy menu item: {}", e))
@@ -636,6 +848,7 @@ fn build_tray_menu(
     profiles_config: &IProfiles,
     proxy_group_order_map: Option<HashMap<String, usize>>,
     proxy_nodes_data: Option<Proxies>,
+    direct_delay: Option<TrayDirectDelay>,
 ) -> Result<tauri::menu::Menu<Wry>> {
     let current_proxy_mode = options.mode.unwrap_or("");
     let tun_mode_available = crate::core::runstate::RUN_STATE.state().tun_capable();
@@ -728,8 +941,13 @@ fn build_tray_menu(
     )?;
 
     let (proxies_menu, inline_proxy_items) = if include_proxy_groups {
-        let proxy_sub_menus =
-            create_subcreate_proxy_menu_item(app_handle, current_proxy_mode, proxy_group_order_map, proxy_nodes_data);
+        let proxy_sub_menus = create_subcreate_proxy_menu_item(
+            app_handle,
+            current_proxy_mode,
+            proxy_group_order_map,
+            proxy_nodes_data,
+            direct_delay,
+        );
 
         match tray_proxy_groups_display_mode {
             "default" => create_proxy_menu_item(app_handle, false, proxy_sub_menus, &texts.proxies)?,

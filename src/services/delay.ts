@@ -4,6 +4,7 @@ import {
   type ProxyDelay,
 } from 'tauri-plugin-mihomo-api'
 
+import { commands } from '@/services/bindings'
 import {
   memberDetails,
   providerNameOf,
@@ -215,6 +216,16 @@ class DelayManager {
     }
 
     this.cache.set(key, update)
+
+    if (delay !== -2) {
+      void commands
+        .recordTrayProxyDelay(name, group, delay)
+        .catch((error) =>
+          debugLog(
+            `[DelayManager] 同步托盘延迟缓存失败，代理: ${name}, 组: ${group}, 错误: ${String(error)}`,
+          ),
+        )
+    }
 
     const queue = this.pendingItemUpdates.get(key)
     if (queue) {
