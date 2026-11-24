@@ -68,7 +68,13 @@ jobs:
       - name: Seed Alpha sidecar from stable Mihomo
         shell: pwsh
         run: |
-          $version = (Invoke-WebRequest -UseBasicParsing "https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt").Content.Trim()
+          $versionResp = Invoke-WebRequest -UseBasicParsing "https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt"
+          $version = if ($versionResp.Content -is [byte[]]) {
+            [System.Text.Encoding]::UTF8.GetString($versionResp.Content).Trim()
+          } else {
+            [string]$versionResp.Content
+          }
+          $version = $version.Trim()
           $zipUrl = "https://github.com/MetaCubeX/mihomo/releases/download/$version/mihomo-windows-amd64-v2-$version.zip"
           $work = Join-Path $env:RUNNER_TEMP "mihomo-stable-as-alpha"
           $zip = Join-Path $work "mihomo.zip"
