@@ -14,7 +14,7 @@ env:
   TAG_NAME: v2.6.0-trayfix-v1.1
   RELEASE_TITLE: Clash Verge Rev v2.6.0 TrayFix v1.1
   SOURCE_RUN_ID: "45366091520"
-  TARGET_SHA: a8d4cb7122d9f872f9b600fc7f663275be5f22e7
+  TARGET_SHA: 0439621bbb66086a116c9309c44db2496649a304
 
 jobs:
   publish:
@@ -95,7 +95,7 @@ jobs:
 
           - 上游功能请求：clash-verge-rev/clash-verge-rev#8726
           - 构建分支：`fix/tray-nested-latency-8726`
-          - 功能提交：`a8d4cb7122d9f872f9b600fc7f663275be5f22e7`
+          - 发布提交：`0439621bbb66086a116c9309c44db2496649a304`（仅包含实际功能代码与 Changelog）
           - Windows x64 NSIS：GitHub Actions Run #45366091520
 
           ### 安装包
