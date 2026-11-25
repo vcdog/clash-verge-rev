@@ -1,4 +1,4 @@
-name: Publish TrayFix v1.2 Release
+name: Publish TrayFix v1.3 Release
 
 on:
   push:
@@ -11,10 +11,10 @@ permissions: write-all
 
 env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  TAG_NAME: v2.6.0-trayfix-v1.2
-  RELEASE_TITLE: Clash Verge Rev v2.6.0 TrayFix v1.2
-  SOURCE_RUN_ID: "45373584733"
-  TARGET_SHA: 54e3e323d469b508d7a4de0b9268134ccd6ab10f
+  TAG_NAME: v2.6.0-trayfix-v1.3
+  RELEASE_TITLE: Clash Verge Rev v2.6.0 TrayFix v1.3
+  SOURCE_RUN_ID: "45411456793"
+  TARGET_SHA: 5696935bc9ee636e5913f1044309fc16a13d422f
 
 jobs:
   publish:
@@ -58,63 +58,49 @@ jobs:
           (cd "$(dirname "$EXE")" && sha256sum "$EXE_NAME") > release-assets/SHA256SUMS.txt
 
           cat > release-notes.md <<'EOF'
-          ## Clash Verge Rev v2.6.0 TrayFix v1.2
+          ## Clash Verge Rev v2.6.0 TrayFix v1.3
 
           基于 Clash Verge Rev **v2.6.0 / dev** 构建的 Windows x64 自定义补丁版。
 
-          ### v1.2 修复
+          ### v1.3 修复
 
-          修复 v1.1 中 Dashboard 已经测速成功，但系统托盘仍大面积显示 `-ms` 的问题。
+          - 修复国内网络环境下 `DIRECT` 直连延迟经常显示「超时」的问题。
+          - `DIRECT` 改用更适合国内网络的直连探针，并并发取最先返回的有效结果。
+          - `DIRECT` 测速单次等待时间缩短，继续保留 60 秒缓存，避免频繁重复测速。
 
-          v1.1 的托盘读取 Mihomo `/proxies` 中的 `history`，而 Clash Verge Rev 当前的手动延迟测试结果主要保存在前端 `DelayManager` 缓存中。订阅刷新、节点改名或内核历史为空时，就会出现 Dashboard 显示 `191ms`，托盘却仍然显示 `-ms`。
+          ### 延续 v1.2 功能
 
-          v1.2 增加 Dashboard → Rust 托盘延迟缓存同步：
-
-          - 客户端手动/批量延迟测试完成后，将最终延迟同步到托盘侧缓存。
-          - 托盘优先使用客户端最近一次真实测速结果，不再只依赖 Mihomo history。
-          - 同一节点的最新测速结果可供不同策略组复用，解决 YouTube、Google服务、Telegram 等策略组重复显示 `-ms`。
-          - 嵌套代理组仍支持递归解析；若代理组本身已有 Dashboard 测速结果则优先显示，否则继续解析最终实际节点。
-          - 托盘测速缓存有效期 30 分钟，与前端 DelayManager 缓存周期保持一致。
-          - Mihomo history 继续作为兜底数据源。
-
-          ### 保留 v1.1 功能
-
-          - `DIRECT` 继续尝试显示真实直连延迟，失败时显示「超时」。
-          - `REJECT`、`REJECT-DROP`、`PASS`、`PassRule`、`COMPATIBLE`、`DNS` 等非测速型特殊出口不显示无意义的 `| -ms`。
-          - 普通节点确实没有任何测速结果时仍显示 `-ms`。
+          - 客户端延迟测试结果会同步到系统托盘。
+          - 托盘优先显示客户端最近一次真实测速结果。
+          - 嵌套代理组递归显示最终实际节点延迟。
+          - 同一节点的延迟可在不同策略组之间复用。
+          - `REJECT`、`REJECT-DROP`、`PASS`、`PassRule`、`COMPATIBLE`、`DNS` 等非测速型出口不再显示无意义的 `| -ms`。
+          - 普通节点没有测速结果时仍显示 `-ms`。
 
           ### 预期效果
-
-          在客户端「代理」页面执行一次延迟测试后：
 
           ```text
           节点选择
             自动选择                  | 179ms
-            DIRECT                    | 35ms
-            奥地利⑤ᴴ²｜🟢空闲·0%     | 245ms
-            美国④ᵛ｜🟢空闲·1%        | 212ms
-
-          YouTube
-            节点选择                  | 245ms
-            自动选择                  | 179ms
-            DIRECT                    | 35ms
+            DIRECT                    | 18ms
+            奥地利⑤ᴴ²                | 245ms
+            美国④ᵛ                   | 212ms
 
           广告拦截
             REJECT
-            DIRECT                    | 35ms
+            DIRECT                    | 18ms
           ```
 
           ### 关联
 
           - 上游功能请求：clash-verge-rev/clash-verge-rev#8726
           - 构建分支：`fix/tray-nested-latency-8726`
-          - 功能构建提交：`c45b5869c5bcc1bc33073e38e78ce71ab3a0d3c4`
-          - 发布提交：`54e3e323d469b508d7a4de0b9268134ccd6ab10f`（不包含 Workflow 修改）
-          - Windows x64 NSIS：GitHub Actions Run #45373584733
+          - 发布提交：`5696935bc9ee636e5913f1044309fc16a13d422f`
+          - Windows x64 NSIS：GitHub Actions Run #45411456793
 
           ### 安装包
 
-          `Clash.Verge_2.6.0_x64-setup_trayfix_v1.2.exe`
+          `Clash.Verge_2.6.0_x64-setup_trayfix_v1.3.exe`
 
           > 这是自定义补丁构建，并非 clash-verge-rev 官方发布版本。
           EOF
