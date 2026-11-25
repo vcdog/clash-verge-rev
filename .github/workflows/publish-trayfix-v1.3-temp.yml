@@ -4,8 +4,6 @@ on:
   pull_request_target:
     types: [closed]
 
-if: github.event.pull_request.merged == true
-
 permissions:
   contents: write
   actions: read
@@ -19,6 +17,7 @@ env:
 
 jobs:
   publish:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
