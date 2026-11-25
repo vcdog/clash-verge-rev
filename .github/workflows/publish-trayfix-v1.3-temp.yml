@@ -1,11 +1,10 @@
 name: Publish TrayFix v1.3 Temp
 
 on:
-  push:
-    branches:
-      - dev
-    paths:
-      - .release/trayfix-v1.3-default.trigger
+  pull_request_target:
+    types: [closed]
+
+if: github.event.pull_request.merged == true
 
 permissions:
   contents: write
