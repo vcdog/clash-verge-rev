@@ -5,7 +5,7 @@ on:
     branches:
       - fix/tray-nested-latency-8726
     paths:
-      - .github/workflows/publish-trayfix-release.yml
+      - .release/trayfix-v1.3.trigger
 
 permissions: write-all
 
