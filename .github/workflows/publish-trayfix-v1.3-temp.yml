@@ -1,0 +1,85 @@
+name: Publish TrayFix v1.3 Temp
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - .release/trayfix-v1.3-default.trigger
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  TAG_NAME: v2.6.0-trayfix-v1.3
+  RELEASE_TITLE: Clash Verge Rev v2.6.0 TrayFix v1.3
+  SOURCE_RUN_ID: "45411456793"
+  TARGET_SHA: 5696935bc9ee636e5913f1044309fc16a13d422f
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag already exists"
+          else
+            git tag "$TAG_NAME" "$TARGET_SHA"
+            git push origin "refs/tags/$TAG_NAME"
+          fi
+
+      - name: Download installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "Clash-Verge-TrayFix-Windows-x64" --dir release-assets
+          EXE="$(find release-assets -type f -name '*.exe' -print -quit)"
+          test -n "$EXE"
+          (cd "$(dirname "$EXE")" && sha256sum "$(basename "$EXE")") > release-assets/SHA256SUMS.txt
+
+      - name: Create release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          ## Clash Verge Rev v2.6.0 TrayFix v1.3
+
+          基于 Clash Verge Rev **v2.6.0 / dev** 构建的 Windows x64 自定义补丁版。
+
+          ### v1.3 修复
+          - 修复国内网络环境下 `DIRECT` 直连延迟经常显示「超时」的问题。
+          - `DIRECT` 改用更适合国内网络的直连探针，并并发取最先返回的有效结果。
+          - `DIRECT` 测速继续保留 60 秒缓存，减少重复测速。
+
+          ### 延续 v1.2 功能
+          - 客户端延迟测试结果同步到系统托盘。
+          - 托盘优先显示最近一次真实测速结果。
+          - 嵌套代理组递归显示最终实际节点延迟。
+          - 同一节点的延迟可在不同策略组之间复用。
+          - 非测速型特殊出口不再显示无意义的 `| -ms`。
+          - 普通节点没有测速结果时仍显示 `-ms`。
+
+          ### 安装包
+          `Clash.Verge_2.6.0_x64-setup_trayfix_v1.3.exe`
+
+          > 自定义补丁构建，并非 clash-verge-rev 官方发布版本。
+          EOF
+
+          EXE="$(find release-assets -type f -name '*.exe' -print -quit)"
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TITLE" --notes-file release-notes.md
+          else
+            gh release create "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$RELEASE_TITLE" --notes-file release-notes.md
+          fi
+          gh release upload "$TAG_NAME" --repo "$GITHUB_REPOSITORY" "$EXE" release-assets/SHA256SUMS.txt --clobber
