@@ -60,7 +60,7 @@ jobs:
           app="$mountpoint/Clash Verge.app"
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
           for binary in "$executable" verge-mihomo verge-mihomo-alpha; do
-            lipo -verify_arch "$ARCH" "$app/Contents/MacOS/$binary"
+            lipo "$app/Contents/MacOS/$binary" -verify_arch "$ARCH"
           done
           codesign --verify --deep --strict "$app"
           mkdir -p artifacts
