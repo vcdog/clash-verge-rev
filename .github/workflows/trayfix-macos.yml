@@ -1,4 +1,4 @@
-name: TrayFix v1.3 macOS
+name: TrayFix v1.3 macOS DMG
 on:
   push:
     branches: [build/trayfix-v1.3-macos]
