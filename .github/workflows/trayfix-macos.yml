@@ -9,30 +9,22 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: macOS ${{ matrix.arch }}
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            arch: arm64
-          - target: x86_64-apple-darwin
-            arch: x86_64
+  intel:
+    name: macOS Intel
+    runs-on: macos-15-intel
     env:
       HUSKY: 0
       CARGO_INCREMENTAL: 0
-      TARGET: ${{ matrix.target }}
-      ARCH: ${{ matrix.arch }}
-    steps:
+      TARGET: x86_64-apple-darwin
+      ARCH: x86_64
+    steps: &package_dmg
       - uses: actions/checkout@v7
         with:
           ref: 5696935bc9ee636e5913f1044309fc16a13d422f
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.100.0
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ env.TARGET }}
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -77,8 +69,19 @@ jobs:
           (cd artifacts && shasum -a 256 "$output" > "$output.sha256")
       - uses: actions/upload-artifact@v7
         with:
-          name: TrayFix-v1.3-macOS-${{ matrix.arch }}
+          name: TrayFix-v1.3-macOS-${{ env.ARCH }}
           path: artifacts/
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+  apple-silicon:
+    name: macOS Apple Silicon
+    needs: intel
+    runs-on: macos-15
+    env:
+      HUSKY: 0
+      CARGO_INCREMENTAL: 0
+      TARGET: aarch64-apple-darwin
+      ARCH: arm64
+    steps: *package_dmg
