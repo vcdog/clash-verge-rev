@@ -1,0 +1,84 @@
+name: TrayFix v1.3 macOS
+on:
+  push:
+    branches: [build/trayfix-v1.3-macos]
+    paths: [.github/workflows/trayfix-macos.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: macOS ${{ matrix.arch }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+          - target: x86_64-apple-darwin
+            arch: x86_64
+    env:
+      HUSKY: 0
+      CARGO_INCREMENTAL: 0
+      TARGET: ${{ matrix.target }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 5696935bc9ee636e5913f1044309fc16a13d422f
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.100.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.13.1'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Use service sources pinned by the v1.3 lockfile
+        run: |
+          git clone -q https://github.com/clash-verge-rev/clash-verge-service-ipc.git ../clash-verge-service-ipc
+          git -C ../clash-verge-service-ipc checkout --detach 3e06ff153e9cb19ae20e0a61f861b371d3f7b2aa
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path('src-tauri/Cargo.toml')
+          source = manifest.read_text()
+          old = 'git = "https://github.com/clash-verge-rev/clash-verge-service-ipc.git", branch = "main"'
+          assert source.count(old) == 1
+          manifest.write_text(source.replace(old, 'path = "../../clash-verge-service-ipc"'))
+          PY
+      - run: pnpm run prebuild "$TARGET"
+      - name: Build app and disk image
+        run: |
+          pnpm tauri build --target "$TARGET" --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":false,"macOS":{"signingIdentity":"-"}}}'
+      - name: Verify packaged app and write checksum
+        run: |
+          set -euo pipefail
+          images=(target/"$TARGET"/release/bundle/dmg/*.dmg)
+          test "${#images[@]}" -eq 1
+          image="${images[0]}"
+          hdiutil verify "$image"
+          mountpoint=$(mktemp -d)
+          hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$image"
+          trap 'hdiutil detach "$mountpoint"' EXIT
+          app="$mountpoint/Clash Verge.app"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          for binary in "$executable" verge-mihomo verge-mihomo-alpha; do
+            lipo -verify_arch "$ARCH" "$app/Contents/MacOS/$binary"
+          done
+          codesign --verify --deep --strict "$app"
+          mkdir -p artifacts
+          output="Clash.Verge_2.6.0_trayfix_v1.3_macos_$ARCH.dmg"
+          cp "$image" "artifacts/$output"
+          (cd artifacts && shasum -a 256 "$output" > "$output.sha256")
+      - uses: actions/upload-artifact@v7
+        with:
+          name: TrayFix-v1.3-macOS-${{ matrix.arch }}
+          path: artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
